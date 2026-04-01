@@ -1,3 +1,3 @@
 # orb-breakout-scanner-skill
 
-Opening Range Breakout (ORB) Scanner skill for US stocks and ETFs (NYSE/NASDAQ).
+Opening Range Breakout (ORB) Scanner for US stocks and ETFs (NYSE/NASDAQ). Always use this skill when the user asks about ORB setups, Opening Range Breakouts, market open analysis, or trading scanners. Also trigger for requests like "Which stocks have an ORB pattern today?", "Scan the market for breakouts", "ORB candidates for today", or "Show me breakout stocks after market open". The skill monitors stock prices via Yahoo Finance, identifies stocks matching the ORB pattern, and notifies the user with concrete trade setup details. NO automated trading – identification and notification only.
