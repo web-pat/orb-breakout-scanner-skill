@@ -1,106 +1,125 @@
 # orb-breakout-scanner-skill
 
-Opening Range Breakout (ORB) scanner for US stocks and ETFs (NYSE/NASDAQ) as a Claude.ai skill.
+A Claude.ai skill that runs a one-time Opening Range Breakout (ORB) scan for a supplied list of US ticker symbols. It downloads same-day 1-minute and 5-minute data from Yahoo Finance, calculates the 09:30-09:45 ET opening range, and reports the first qualifying 5-minute breakout found for each symbol.
 
-Upload it once to Claude.ai, then just chat — Claude detects ORB setups after the market open and replies with concrete entry / stop-loss / take-profit levels. **Detection and notification only — no automated trading.**
+The scanner is informational only. It does not place trades, monitor continuously, send alerts, store a watchlist, validate ticker eligibility, or determine whether a previously detected setup is still actionable.
 
-## Compatibility
+## What it does
 
-- **Claude.ai** (Free, Pro, Max, Team, Enterprise) — primary target.
-- Requires **Code Execution enabled** (Claude uses it to run `scripts/orb_scan.py` and fetch Yahoo Finance data).
-- Data source: Yahoo Finance, US market hours only (09:30–16:00 ET).
+For each ticker, the scanner:
+
+1. Downloads same-day 5-minute and 1-minute Yahoo Finance data.
+2. Builds the opening range from 5-minute bars timestamped from 09:30 through 09:44 ET.
+3. Finds the first later 5-minute bar whose full range is outside that opening range.
+4. Labels the detected setup as `breakout`, `retest`, or `reversal` using a short 1-minute-bar heuristic.
+5. Calculates an entry at the detected 5-minute bar's close, a stop loss, and a fixed 2:1 reward-to-risk take-profit level.
+6. Writes the result to JSON and prints scan progress to standard output.
+
+The scan is a snapshot, not a live signal service. A returned signal may have occurred earlier in the day and may subsequently have failed, reached its target or stop, or otherwise become unsuitable for trading.
+
+## Requirements
+
+- A Claude.ai plan and workspace that support custom Skills and have Code Execution enabled.
+- Python 3.10 or later.
+- Internet access and permission to install Python packages in the execution environment.
+- `yfinance`, `pandas`, and `pytz`.
+- A writable location for the JSON output file.
+
+Yahoo Finance is a third-party data source. Intraday data can be delayed, incomplete, unavailable, or revised. Do not rely on its prices as an execution-price source.
 
 ## Install on Claude.ai
 
-1. Download this repo (`Code > Download ZIP` on GitHub, or `git clone`), then re-zip so the archive looks like:
-   ```
+1. Download this repository, then create a ZIP whose top-level folder contains:
+
+   ```text
    orb-breakout-scanner-skill/
-   ├── SKILL.md
-   ├── scripts/orb_scan.py
-   └── references/orb_logic.md
+   |- SKILL.md
+   |- scripts/orb_scan.py
+   `- references/orb_logic.md
    ```
-   `SKILL.md` must be at the top level of the skill folder (folder name matches `name:` in `SKILL.md`).
-2. In Claude.ai go to **Settings > Skills > Upload skill** and upload the ZIP.
-3. Make sure the skill is **enabled** and **Code Execution is on**.
-4. Start a new chat — no manual selection needed, Claude loads the skill automatically when you ask about ORBs or breakouts.
 
-## How to use: your own watchlist by just telling Claude
+2. In Claude.ai, open **Settings > Skills**, upload the ZIP, and enable the skill and Code Execution.
+3. Start a chat and ask for an opening-range-breakout or market-open scan. Skill selection is determined by Claude and is not guaranteed for every prompt.
 
-You never edit a config file. You define the watchlist **in plain language in the chat**.
+## Using the skill
 
-**1. Use the default watchlist (no setup):**
-> Scan the market for ORB breakouts today
+Ask Claude to scan specific symbols or use the built-in default list.
 
-Claude scans the built-in list (SPY, QQQ, IWM, DIA, AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, JPM, BAC, XOM, UNH).
+```text
+Scan AAPL, TSLA, and QQQ for opening range breakouts.
+```
 
-**2. Scan a one-off custom list:**
-> Only scan AAPL, TSLA and QQQ for ORBs today
+```text
+Scan the default ORB watchlist.
+```
 
-> Scan NVDA, AMD, SMCI and SOXL for opening range breakouts
+The default watchlist is:
 
-**3. Set a persistent watchlist for the conversation:**
-> My watchlist is SPY, NVDA, META, JPM and XLE — remember it for today and scan it for ORBs every time I ask
+```text
+SPY, QQQ, IWM, DIA, AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, JPM, BAC, XOM, UNH
+```
 
-> I only trade tech: AAPL, MSFT, NVDA, AVGO, QQQ. Use that as my ORB watchlist from now on.
+The underlying script accepts only these options:
 
-Tip: keep lists to ~5–15 tickers for the cleanest results. Use valid US tickers (stocks + ETFs). The list applies to the current chat — just paste it again in a new chat.
+```bash
+python scripts/orb_scan.py --tickers "SPY,QQQ,AAPL" --output /tmp/orb_results.json
+```
 
-**Other useful prompts:**
-- `Which stocks have an ORB pattern right now?`
-- `ORB candidates for today from my watchlist?`
-- `Show me breakout stocks after market open`
-- `Check SPY and QQQ — LONG setups only, 2:1 RRR`
+```bash
+python scripts/orb_scan.py --output /tmp/orb_results.json
+```
 
-## When to scan
+`--tickers` is a comma-separated list. Omitting it uses the default watchlist. `--output` sets the JSON output path and defaults to `/tmp/orb_results.json`.
+
+The scanner does not support long-only or short-only filtering, custom reward-to-risk ratios, historical dates, alerts, scheduling, or saved watchlists. It attempts every supplied symbol; intended use is US stocks and ETFs, but the script does not enforce exchange or asset-class restrictions.
+
+## Timing and market status
 
 | Event | US Eastern Time |
-|-------|-----------------|
-| Market open | 09:30 ET |
-| Opening Range end (first 15-min candle) | 09:45 ET |
-| Best breakout window | 09:45–11:30 ET |
-| Market close | 16:00 ET |
+|---|---:|
+| Opening range starts | 09:30 ET |
+| Opening range ends | 09:45 ET |
+| Market close used by the script | 16:00 ET |
 
-Before 09:45 ET there is no confirmed signal yet. Outside trading hours Claude will tell you the market is closed and offer to review the last trading day instead.
+The scanner can run before, during, or after those hours. Outside 09:30-16:00 ET, it records a market-closed warning and still attempts a scan using Yahoo Finance's `period="1d"` data. It has no historical-date option and does not validate weekends, holidays, early closes, or the completeness of the latest candle.
 
-## What you get back
+The commonly used 09:45-11:30 ET breakout period is a trading preference, not a cutoff enforced by this scanner; it searches available 5-minute bars from 09:45 onward.
 
-Signal example:
-```
-📊 ORB SIGNAL: NVDA
-Direction:    📈 LONG
-Scenario:     Breakout | Retest | Reversal
-Time (ET):    10:05
-Price:        $XXX.XX
-Opening Range: High $XXX.XX / Low $XXX.XX
-Suggested Levels (2:1 RRR):
-  Entry: $XXX.XX / Stop Loss: $XXX.XX / Take Profit: $XXX.XX
-```
+## Output
 
-Every signal ends with a risk disclaimer: ORB setups can fail on stop-hunts outside the Opening Range. Max 1 trade per day, RRR ≥ 2:1 recommended. This is information only, not investment advice.
+The output JSON contains:
 
-No signal:
-```
-🔍 ORB Scan complete – tickers scanned: X, Active ORB signals: None
-Possible reasons: market still within the Opening Range, no confirmed breakout on the 5-min chart yet.
+```text
+scan_time_et       Scan timestamp in Eastern Time
+market_open        Time-of-day market-status check
+tickers_scanned    Number of requested ticker strings
+signals            Detected breakout records
+no_signal          Tickers still inside the range or without confirmation
+errors             Tickers without sufficient data or an opening range
+warning            Present when the time-of-day check reports market closed
 ```
 
-## Troubleshooting
+A signal includes the ticker, direction, scenario label, opening range, confirmation time and close, calculated levels, and notes. `confirm_time_et` is the timestamp of the detected 5-minute bar; it is not a current quote.
 
-| Problem | What to do |
-|---------|------------|
-| Skill didn't trigger | Use a trigger phrase like “ORB”, “opening range breakout”, or “scan for breakouts” |
-| Market closed notice | Expected outside 09:30–16:00 ET — ask for the last trading day |
-| Ticker skipped / no data | Check spelling, use NYSE/NASDAQ symbols only |
-| “Wide Opening Range” warning | >5% range = high-volatility day, elevated risk |
-| Too early, no signal | Wait until after 09:45 ET for confirmation |
+The scenario labels are heuristic. The `breakout` label is also used when the short follow-up analysis does not identify a retest or reversal. The scanner does not rank signals, apply volume analysis, or validate that a setup remains active.
 
-## Repo layout
+## Limitations and risk
 
-- `SKILL.md` — instructions Claude follows (workflow, watchlist handling, output format). Frontmatter `name` matches folder name and `description` is under Claude.ai's 200-character limit.
-- `scripts/orb_scan.py` — fetches 1m/5m Yahoo Finance data, calculates Opening Range, confirmation, scenarios, SL/TP.
-- `references/orb_logic.md` — full ORB calculation details (Opening Range, FVG, retest, reversal, 2:1 RRR).
-- `LICENSE` — MIT.
+- The scan uses the first qualifying breakout for the day, not necessarily the most recent or best setup.
+- A confirmation can be based on an in-progress data bar because the script does not verify bar completion.
+- Market status is based on clock time only, not an exchange calendar.
+- Invalid, duplicate, or non-US symbols are not filtered before the Yahoo Finance request.
+- Network and data-provider failures can produce missing-data results.
 
-## License / disclaimer
+No automated trading is performed. Output is for informational purposes only and is not investment advice. Independently verify market status, data quality, prices, and risk before making any trading decision.
 
-MIT. No automated trading. Signals are for informational purposes only and do not constitute investment advice.
+## Repository layout
+
+- `SKILL.md`: Instructions and metadata for Claude.ai.
+- `scripts/orb_scan.py`: Scanner implementation and supported CLI parameters.
+- `references/orb_logic.md`: Background ORB methodology. Where it differs from the script, `scripts/orb_scan.py` defines the behavior actually executed.
+- `LICENSE`: MIT license.
+
+## License
+
+MIT.
